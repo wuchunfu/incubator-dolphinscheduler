@@ -53,7 +53,7 @@ const toolOper = (dagThis) => {
     },
     {
       code: 'screen',
-      icon: 'el-icon-rank',
+      icon: 'el-icon-full-screen',
       disable: false,
       desc: `${i18n.$t('Full Screen')}`
     }
@@ -150,7 +150,7 @@ const tasksState = {
     id: 0,
     desc: `${i18n.$t('Submitted successfully')}`,
     color: '#A9A9A9',
-    icoUnicode: 'fa-dot-circle-o',
+    icoUnicode: 'fa fa-dot-circle-o',
     isSpin: false
   },
   RUNNING_EXECUTION: {
