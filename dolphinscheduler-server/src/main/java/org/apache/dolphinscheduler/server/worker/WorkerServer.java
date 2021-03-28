@@ -95,9 +95,8 @@ public class WorkerServer implements IStoppable {
     private WorkerManagerThread workerManagerThread;
 
     /**
-     * worker server startup
+     * worker server startup, not use web service
      *
-     * worker server not use web service
      * @param args arguments
      */
     public static void main(String[] args) {
@@ -105,37 +104,35 @@ public class WorkerServer implements IStoppable {
         new SpringApplicationBuilder(WorkerServer.class).web(WebApplicationType.NONE).run(args);
     }
 
-
     /**
      * worker server run
      */
     @PostConstruct
     public void run() {
+        // alert-server client registry
+        alertClientService = new AlertClientService(workerConfig.getAlertListenHost(), Constants.ALERT_RPC_PORT);
+
+        // init remoting server
+        NettyServerConfig serverConfig = new NettyServerConfig();
+        serverConfig.setListenPort(workerConfig.getListenPort());
+        this.nettyRemotingServer = new NettyRemotingServer(serverConfig);
+        this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_REQUEST, new TaskExecuteProcessor(alertClientService));
+        this.nettyRemotingServer.registerProcessor(CommandType.TASK_KILL_REQUEST, new TaskKillProcessor());
+        this.nettyRemotingServer.registerProcessor(CommandType.DB_TASK_ACK, new DBTaskAckProcessor());
+        this.nettyRemotingServer.registerProcessor(CommandType.DB_TASK_RESPONSE, new DBTaskResponseProcessor());
+        this.nettyRemotingServer.start();
+
+        // worker registry
         try {
-            logger.info("start worker server...");
-
-            //init remoting server
-            NettyServerConfig serverConfig = new NettyServerConfig();
-            serverConfig.setListenPort(workerConfig.getListenPort());
-            this.nettyRemotingServer = new NettyRemotingServer(serverConfig);
-            this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_REQUEST, new TaskExecuteProcessor());
-            this.nettyRemotingServer.registerProcessor(CommandType.TASK_KILL_REQUEST, new TaskKillProcessor());
-            this.nettyRemotingServer.registerProcessor(CommandType.DB_TASK_ACK, new DBTaskAckProcessor());
-            this.nettyRemotingServer.registerProcessor(CommandType.DB_TASK_RESPONSE, new DBTaskResponseProcessor());
-            this.nettyRemotingServer.start();
-
+            this.workerRegistry.registry();
             this.workerRegistry.getZookeeperRegistryCenter().setStoppable(this);
             Set<String> workerZkPaths = this.workerRegistry.getWorkerZkPaths();
             this.workerRegistry.getZookeeperRegistryCenter().getRegisterOperator().handleDeadServer(workerZkPaths, ZKNodeType.WORKER, Constants.DELETE_ZK_OP);
-            // worker registry
-            this.workerRegistry.registry();
-
-            // retry report task status
-            this.retryReportTaskStatusThread.start();
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw new RuntimeException(e);
         }
+
         // task execute manager
         this.workerManagerThread.start();
 
@@ -145,12 +142,9 @@ public class WorkerServer implements IStoppable {
         /**
          * register hooks, which are called before the process exits
          */
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (Stopper.isRunning()) {
-                    close("shutdownHook");
-                }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (Stopper.isRunning()) {
+                close("shutdownHook");
             }
         }));
     }
@@ -158,7 +152,7 @@ public class WorkerServer implements IStoppable {
     public void close(String cause) {
 
         try {
-            //execute only once
+            // execute only once
             if (Stopper.isStopped()) {
                 return;
             }
@@ -169,21 +163,18 @@ public class WorkerServer implements IStoppable {
             Stopper.stop();
 
             try {
-                //thread sleep 3 seconds for thread quitely stop
+                // thread sleep 3 seconds for thread quitely stop
                 Thread.sleep(3000L);
             } catch (Exception e) {
                 logger.warn("thread sleep exception", e);
             }
 
+            // close
             this.nettyRemotingServer.close();
             this.workerRegistry.unRegistry();
-
             this.alertClientService.close();
-
         } catch (Exception e) {
             logger.error("worker server stop exception ", e);
-        } finally {
-            System.exit(-1);
         }
     }
 

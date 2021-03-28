@@ -27,7 +27,6 @@ import org.apache.dolphinscheduler.server.master.config.MasterConfig;
 import org.apache.dolphinscheduler.server.master.processor.TaskAckProcessor;
 import org.apache.dolphinscheduler.server.master.processor.TaskKillResponseProcessor;
 import org.apache.dolphinscheduler.server.master.processor.TaskResponseProcessor;
-import org.apache.dolphinscheduler.server.master.registry.MasterRegistry;
 import org.apache.dolphinscheduler.server.master.runner.MasterSchedulerService;
 import org.apache.dolphinscheduler.server.worker.WorkerServer;
 import org.apache.dolphinscheduler.server.zk.ZKMasterClient;
@@ -74,12 +73,6 @@ public class MasterServer implements IStoppable {
     private NettyRemotingServer nettyRemotingServer;
 
     /**
-     * master registry
-     */
-    @Autowired
-    private MasterRegistry masterRegistry;
-
-    /**
      * zk master client
      */
     @Autowired
@@ -92,9 +85,7 @@ public class MasterServer implements IStoppable {
     private MasterSchedulerService masterSchedulerService;
 
     /**
-     * master server startup
-     * <p>
-     * master server not use web service
+     * master server startup, not use web service
      *
      * @param args arguments
      */
@@ -108,25 +99,17 @@ public class MasterServer implements IStoppable {
      */
     @PostConstruct
     public void run() {
-        try {
-            //init remoting server
-            NettyServerConfig serverConfig = new NettyServerConfig();
-            serverConfig.setListenPort(masterConfig.getListenPort());
-            this.nettyRemotingServer = new NettyRemotingServer(serverConfig);
-            this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_RESPONSE, new TaskResponseProcessor());
-            this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_ACK, new TaskAckProcessor());
-            this.nettyRemotingServer.registerProcessor(CommandType.TASK_KILL_RESPONSE, new TaskKillResponseProcessor());
-            this.nettyRemotingServer.start();
-
-            this.masterRegistry.getZookeeperRegistryCenter().setStoppable(this);
-
-        } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-            throw new RuntimeException(e);
-        }
+        // init remoting server
+        NettyServerConfig serverConfig = new NettyServerConfig();
+        serverConfig.setListenPort(masterConfig.getListenPort());
+        this.nettyRemotingServer = new NettyRemotingServer(serverConfig);
+        this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_RESPONSE, new TaskResponseProcessor());
+        this.nettyRemotingServer.registerProcessor(CommandType.TASK_EXECUTE_ACK, new TaskAckProcessor());
+        this.nettyRemotingServer.registerProcessor(CommandType.TASK_KILL_RESPONSE, new TaskKillResponseProcessor());
+        this.nettyRemotingServer.start();
 
         // self tolerant
-        this.zkMasterClient.start();
+        this.zkMasterClient.start(this);
 
         // scheduler start
         this.masterSchedulerService.start();
@@ -146,14 +129,11 @@ public class MasterServer implements IStoppable {
         }
 
         /**
-         *  register hooks, which are called before the process exits
+         * register hooks, which are called before the process exits
          */
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (Stopper.isRunning()) {
-                    close("shutdownHook");
-                }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (Stopper.isRunning()) {
+                close("shutdownHook");
             }
         }));
 
@@ -167,7 +147,7 @@ public class MasterServer implements IStoppable {
     public void close(String cause) {
 
         try {
-            //execute only once
+            // execute only once
             if (Stopper.isStopped()) {
                 return;
             }
@@ -178,28 +158,24 @@ public class MasterServer implements IStoppable {
             Stopper.stop();
 
             try {
-                //thread sleep 3 seconds for thread quietly stop
+                // thread sleep 3 seconds for thread quietly stop
                 Thread.sleep(3000L);
             } catch (Exception e) {
                 logger.warn("thread sleep exception ", e);
             }
-            //
+            // close
             this.masterSchedulerService.close();
             this.nettyRemotingServer.close();
-            this.masterRegistry.unRegistry();
             this.zkMasterClient.close();
-            //close quartz
+            // close quartz
             try {
                 QuartzExecutors.getInstance().shutdown();
                 logger.info("Quartz service stopped");
             } catch (Exception e) {
                 logger.warn("Quartz service stopped exception:{}", e.getMessage());
             }
-
         } catch (Exception e) {
             logger.error("master server stop exception ", e);
-        } finally {
-            System.exit(-1);
         }
     }
 
@@ -208,4 +184,3 @@ public class MasterServer implements IStoppable {
         close(cause);
     }
 }
-
