@@ -617,7 +617,7 @@ public class MasterExecThread implements Runnable {
             }
             ExecutionStatus depTaskState = completeTaskList.get(depsNode).getState();
             if (depTaskState.typeIsPause() || depTaskState.typeIsCancel()) {
-                return DependResult.WAITING;
+                return DependResult.NON_EXEC;
             }
             // ignore task state if current task is condition
             if (taskNode.isConditionsTask()) {
@@ -887,7 +887,7 @@ public class MasterExecThread implements Runnable {
         try {
             readyToSubmitTaskQueue.put(taskInstance);
         } catch (Exception e) {
-            logger.error("add task instance to readyToSubmitTaskQueue error");
+            logger.error("add task instance to readyToSubmitTaskQueue error, taskName: {}", taskInstance.getName(), e);
         }
     }
 
@@ -901,7 +901,7 @@ public class MasterExecThread implements Runnable {
         try {
             readyToSubmitTaskQueue.remove(taskInstance);
         } catch (Exception e) {
-            logger.error("remove task instance from readyToSubmitTaskQueue error");
+            logger.error("remove task instance from readyToSubmitTaskQueue error, taskName: {}", taskInstance.getName(), e);
         }
     }
 
@@ -1148,6 +1148,10 @@ public class MasterExecThread implements Runnable {
                     dependFailedTask.put(task.getName(), task);
                     removeTaskFromStandbyList(task);
                     logger.info("task {},id:{} depend result : {}", task.getName(), task.getId(), dependResult);
+                } else if (DependResult.NON_EXEC == dependResult) {
+                    // for some reasons(depend task pause/stop) this task would not be submit
+                    removeTaskFromStandbyList(task);
+                    logger.info("remove task {},id:{} , because depend result : {}", task.getName(), task.getId(), dependResult);
                 }
             }
         } catch (Exception e) {
